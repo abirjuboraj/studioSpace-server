@@ -44,6 +44,19 @@ app.get("/studios", async (req, res) => {
   }
 });
 
+// featured studios (top 6 rated)
+
+app.get("/featured-studios", async(req, res)=> {
+  try {
+    const featuredStudios = await studioCollection.find().sort({rating: -1}).limit(6).toArray();
+
+    res.send(featuredStudios);
+  } catch (error) {
+     console.error("GET /featured-studios failed:", err);
+    res.status(500).json({ success: false, message: "Failed to load featured studios" });
+  }
+})
+
 //new studio add
 
 app.post("/studios/new", async (req, res) => {
