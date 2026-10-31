@@ -1,7 +1,7 @@
 import express from "express";
 import cors from "cors";
 import "dotenv/config";
-import { MongoClient } from "mongodb";
+import { MongoClient, ObjectId } from "mongodb";
 
 const PORT = process.env.PORT || 5000;
 
@@ -46,16 +46,40 @@ app.get("/studios", async (req, res) => {
 
 // featured studios (top 6 rated)
 
-app.get("/featured-studios", async(req, res)=> {
+app.get("/featured-studios", async (req, res) => {
   try {
-    const featuredStudios = await studioCollection.find().sort({rating: -1}).limit(6).toArray();
+    const featuredStudios = await studioCollection
+      .find()
+      .sort({ rating: -1 })
+      .limit(6)
+      .toArray();
 
     res.send(featuredStudios);
   } catch (error) {
-     console.error("GET /featured-studios failed:", err);
-    res.status(500).json({ success: false, message: "Failed to load featured studios" });
+    console.error("GET /featured-studios failed:", err);
+    res
+      .status(500)
+      .json({ success: false, message: "Failed to load featured studios" });
   }
-})
+});
+
+// studio details
+
+app.get("/studios/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (!ObjectId.isValid(id))
+      return res.status(400).send({ message: "Invalid studio Id" });
+
+    const studio = await studioCollection.findOne({ _id: new ObjectId(id) });
+
+    if (!studio) return res.status(404).send({ message: "Studio not found" });
+    res.send(studio);
+  } catch (error) {
+    res.status(500).send({ message: "Something went wrong" });
+  }
+});
 
 //new studio add
 
