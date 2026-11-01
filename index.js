@@ -305,37 +305,56 @@ app.post("/bookings", verifyJWT, async (req, res) => {
   }
 });
 
-// booking delete
+// booking cancel
 
-app.delete("/bookings/:id", verifyJWT, async (req, res) => {
-  const { id } = req.params;
-
-  const userId = req.jwtPayload?.sub;
-
-  if (!userId) {
-    return res.status(401).send({ message: "Unauthorized" });
-  }
-
-  if (!ObjectId.isValid(id)) {
-    return res.status(400).send({ message: "Invalid booking Id" });
-  }
-
+app.patch("/bookings/:id/cancel", verifyJWT, async (req, res) => {
   try {
-    const result = await studioBookingCollection.deleteOne({
-      _id: new ObjectId(id),
-      userId: userId,
-    });
+    const { id } = req.params;
 
-    if (result.deletedCount === 0) {
-      return res
-        .status(404)
-        .send({ message: "Booking not found or unauthorized" });
+    const userId = req.jwtPayload?.sub;
+
+    if (!userId) {
+      return res.status(401).send({
+        message: "Unauthorized",
+      });
     }
 
-    res.send({ message: "Booking deleted successfully" });
+    if (!ObjectId.isValid(id)) {
+      return res.status(400).send({
+        message: "Invalid booking Id",
+      });
+    }
+
+    const result = await studioBookingCollection.updateOne(
+      {
+        _id: new ObjectId(id),
+        userId: userId,
+        status: "pending",
+      },
+      {
+        $set: {
+          status: "cancelled",
+        },
+      },
+    );
+
+    if (result.matchedCount === 0) {
+      return res.status(404).send({
+        message: "Booking not found or cannot be cancelled",
+      });
+    }
+
+    res.status(200).send({
+      success: true,
+      message: "Booking cancelled successfully",
+    });
   } catch (error) {
-    console.error("DELETE /bookings/:id failed:", error);
-    res.status(500).send({ message: "Failed to delete booking" });
+    console.error("PATCH /bookings/:id/cancel failed:", error);
+
+    res.status(500).send({
+      success: false,
+      message: "Failed to cancel booking",
+    });
   }
 });
 
