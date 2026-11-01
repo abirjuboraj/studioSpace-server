@@ -105,6 +105,62 @@ app.get("/my-studio-listings/:hostEmail", verifyJWT, async (req, res) => {
   }
 });
 
+// host studio update
+
+app.patch("/edit/:id", verifyJWT, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const hostEmail = req.jwtPayload?.email;
+
+    if (!hostEmail) {
+      return res.status(401).send({
+        message: "Unauthorized",
+      });
+    }
+
+    if (!ObjectId.isValid(id)) {
+      return res.status(400).send({
+        message: "Invalid studio Id",
+      });
+    }
+
+    const updatedStudio = req.body;
+
+    delete updatedStudio._id;
+    delete updatedStudio.hostId;
+    delete updatedStudio.hostEmail;
+
+    const result = await studioCollection.updateOne(
+      {
+        _id: new ObjectId(id),
+        hostEmail: hostEmail,
+      },
+      {
+        $set: updatedStudio,
+      },
+    );
+
+    if (result.matchedCount === 0) {
+      return res.status(404).send({
+        message: "Studio not found or unauthorized",
+      });
+    }
+
+    res.status(200).send({
+      success: true,
+      message: "Studio updated successfully",
+    });
+  } catch (error) {
+    console.error("PATCH /edit/:id failed:", error);
+
+    res.status(500).send({
+      success: false,
+      message: "Failed to update studio",
+    });
+  }
+});
+
 // featured studios get (top 6 rated)
 
 app.get("/featured-studios", async (req, res) => {
@@ -227,7 +283,9 @@ app.delete("/bookings/:id", verifyJWT, async (req, res) => {
     });
 
     if (result.deletedCount === 0) {
-      return res.status(404).send({ message: "Booking not found or unauthorized" });
+      return res
+        .status(404)
+        .send({ message: "Booking not found or unauthorized" });
     }
 
     res.send({ message: "Booking deleted successfully" });
