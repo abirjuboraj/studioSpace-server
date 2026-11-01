@@ -2,6 +2,7 @@ import express from "express";
 import cors from "cors";
 import "dotenv/config";
 import { MongoClient, ObjectId } from "mongodb";
+import { createRemoteJWKSet } from "jose";
 
 const PORT = process.env.PORT || 5000;
 
@@ -26,6 +27,34 @@ const studioSpaceClient = await connectToMongoDB();
 const db = studioSpaceClient.db("studioSpace");
 
 const studioCollection = db.collection("studios");
+const studioBookingCollection = db.collection("bookings");
+
+
+const AUTH_URL= process.env.BETTER_AUTH_URL;
+
+ const JWKS = createRemoteJWKSet(
+      new URL(`${AUTH_URL}/api/auth/jwks`))
+
+// verify jwt token middleware
+
+const verifyJWT = async(req, res, next) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader) {
+    return res.status(401).send({ message: "Unauthorized access" });
+  }
+
+  const token = authHeader.split(" ")[1];
+
+  try {
+    const { payload } = await jwtVerify(token, JWKS);
+    req.jwtPayload = payload;
+    next();
+  } catch (error) {
+    return res.status(401).send({ message: "Invalid or expired token" });
+  }
+
+}
+
 
 app.get("/", (req, res) => {
   res.send("Server running successfully");
@@ -46,21 +75,20 @@ app.get("/studios", async (req, res) => {
 
 //host studio get
 
-app.get("/my-studio-listings/:hostId", async (req, res) => {
+app.get("/my-studio-listings/:hostEmail",verifyJWT, async (req, res) => {
   try {
-    const { hostId } = req.params;
+    const { hostEmail } = req.params;
 
-    console.log("Host ID:", hostId);
 
-    if (!hostId)
-      return res.status(400).send({ message: "Host Id is required" });
+    if (!hostEmail)
+      return res.status(400).send({ message: "Host Email is required" });
 
     const hostStudios = await studioCollection
-      .find({ hostId:hostId })
+      .find({ hostEmail:hostEmail })
       .toArray();
     res.send(hostStudios);
   } catch (error) {
-    console.error("GET /my-studio-listings/:hostId failed:", error);
+    console.error("GET /my-studio-listings/:hostEmail failed:", error);
     res
       .status(500)
       .json({ success: false, message: "Failed to load host studios" });
@@ -106,7 +134,7 @@ app.get("/studios/:id", async (req, res) => {
 
 //new studio add
 
-app.post("/studios/new", async (req, res) => {
+app.post("/studios/new",verifyJWT, async (req, res) => {
   const newStudio = req.body;
 
   try {
@@ -124,6 +152,49 @@ app.post("/studios/new", async (req, res) => {
       .json({ success: false, message: "Failed to add new studio" });
   }
 });
+
+// booked studio get
+
+app.get("/bookings/:userEmail",verifyJWT, async(req, res)=> {
+  try {
+    const {userEmail} = req.params;
+
+
+    if(!userEmail) return res.status(400).send({message: "User Email is required"});
+
+    const userBookings = await studioBookingCollection.find({userEmail:userEmail}).toArray();
+
+    res.send(userBookings);
+  } catch (error) {
+    console.error("GET /bookings/:email failed:", error);
+    res
+      .status(500)
+      .json({ success: false, message: "Failed to load user bookings" });
+  }
+})
+
+// studio booking add
+app.post("/bookings",verifyJWT, async(req, res)=>{
+  try {
+    const studioBooked = req.body;
+
+    const result = await studioBookingCollection.insertOne(studioBooked);
+    res.json({
+      success: true,
+      message: "Booking received",
+      Data: studioBooked,
+      Result: result,
+    });
+  } catch (error) {
+    console.error("POST /bookings failed:", error);
+    res
+      .status(500)
+      .json({ success: false, message: "Failed to add new booking" });
+  }
+
+
+})
+
 
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
