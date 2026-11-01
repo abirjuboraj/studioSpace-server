@@ -161,6 +161,50 @@ app.patch("/edit/:id", verifyJWT, async (req, res) => {
   }
 });
 
+// host studio delete
+app.delete("/studios/:id", verifyJWT, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const hostEmail = req.jwtPayload?.email;
+
+    if (!hostEmail) {
+      return res.status(401).send({
+        message: "Unauthorized",
+      });
+    }
+
+    if (!ObjectId.isValid(id)) {
+      return res.status(400).send({
+        message: "Invalid studio Id",
+      });
+    }
+
+    const result = await studioCollection.deleteOne({
+      _id: new ObjectId(id),
+      hostEmail: hostEmail,
+    });
+
+    if (result.deletedCount === 0) {
+      return res.status(404).send({
+        message: "Studio not found or unauthorized",
+      });
+    }
+
+    res.status(200).send({
+      success: true,
+      message: "Studio deleted successfully",
+    });
+  } catch (error) {
+    console.error("DELETE /studios/:id failed:", error);
+
+    res.status(500).send({
+      success: false,
+      message: "Failed to delete studio",
+    });
+  }
+});
+
 // featured studios get (top 6 rated)
 
 app.get("/featured-studios", async (req, res) => {
