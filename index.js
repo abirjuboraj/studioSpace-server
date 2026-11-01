@@ -44,6 +44,29 @@ app.get("/studios", async (req, res) => {
   }
 });
 
+//host studio get
+
+app.get("/my-studio-listings/:hostId", async (req, res) => {
+  try {
+    const { hostId } = req.params;
+
+    console.log("Host ID:", hostId);
+
+    if (!hostId)
+      return res.status(400).send({ message: "Host Id is required" });
+
+    const hostStudios = await studioCollection
+      .find({ hostId:hostId })
+      .toArray();
+    res.send(hostStudios);
+  } catch (error) {
+    console.error("GET /my-studio-listings/:hostId failed:", error);
+    res
+      .status(500)
+      .json({ success: false, message: "Failed to load host studios" });
+  }
+});
+
 // featured studios (top 6 rated)
 
 app.get("/featured-studios", async (req, res) => {
