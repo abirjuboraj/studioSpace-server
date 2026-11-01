@@ -2,7 +2,7 @@ import express from "express";
 import cors from "cors";
 import "dotenv/config";
 import { MongoClient, ObjectId } from "mongodb";
-import { createRemoteJWKSet } from "jose";
+import { createRemoteJWKSet, jwtVerify } from "jose";
 
 const PORT = process.env.PORT || 5000;
 
@@ -29,32 +29,43 @@ const db = studioSpaceClient.db("studioSpace");
 const studioCollection = db.collection("studios");
 const studioBookingCollection = db.collection("bookings");
 
+const AUTH_URL = process.env.BETTER_AUTH_URL;
 
-const AUTH_URL= process.env.BETTER_AUTH_URL;
+const JWKS = createRemoteJWKSet(new URL(`${AUTH_URL}/api/auth/jwks`));
 
- const JWKS = createRemoteJWKSet(
-      new URL(`${AUTH_URL}/api/auth/jwks`))
-
-// verify jwt token middleware
-
-const verifyJWT = async(req, res, next) => {
+const verifyJWT = async (req, res, next) => {
   const authHeader = req.headers.authorization;
+
   if (!authHeader) {
-    return res.status(401).send({ message: "Unauthorized access" });
+    return res.status(401).send({
+      message: "Authorization header missing",
+    });
   }
 
   const token = authHeader.split(" ")[1];
 
-  try {
-    const { payload } = await jwtVerify(token, JWKS);
-    req.jwtPayload = payload;
-    next();
-  } catch (error) {
-    return res.status(401).send({ message: "Invalid or expired token" });
+  if (!token) {
+    return res.status(401).send({
+      message: "Token missing",
+    });
   }
 
-}
+  try {
+    const { payload } = await jwtVerify(token, JWKS);
 
+    console.log("JWT Payload:", payload);
+
+    req.jwtPayload = payload;
+
+    next();
+  } catch (error) {
+    console.error("JWT Verification Error:", error);
+
+    return res.status(401).send({
+      message: "Invalid or expired token",
+    });
+  }
+};
 
 app.get("/", (req, res) => {
   res.send("Server running successfully");
@@ -75,16 +86,15 @@ app.get("/studios", async (req, res) => {
 
 //host studio get
 
-app.get("/my-studio-listings/:hostEmail",verifyJWT, async (req, res) => {
+app.get("/my-studio-listings/:hostEmail", verifyJWT, async (req, res) => {
   try {
     const { hostEmail } = req.params;
-
 
     if (!hostEmail)
       return res.status(400).send({ message: "Host Email is required" });
 
     const hostStudios = await studioCollection
-      .find({ hostEmail:hostEmail })
+      .find({ hostEmail: hostEmail })
       .toArray();
     res.send(hostStudios);
   } catch (error) {
@@ -95,7 +105,7 @@ app.get("/my-studio-listings/:hostEmail",verifyJWT, async (req, res) => {
   }
 });
 
-// featured studios (top 6 rated)
+// featured studios get (top 6 rated)
 
 app.get("/featured-studios", async (req, res) => {
   try {
@@ -114,7 +124,7 @@ app.get("/featured-studios", async (req, res) => {
   }
 });
 
-// studio details
+// studio details get
 
 app.get("/studios/:id", async (req, res) => {
   try {
@@ -134,7 +144,7 @@ app.get("/studios/:id", async (req, res) => {
 
 //new studio add
 
-app.post("/studios/new",verifyJWT, async (req, res) => {
+app.post("/studios/new", verifyJWT, async (req, res) => {
   const newStudio = req.body;
 
   try {
@@ -155,14 +165,16 @@ app.post("/studios/new",verifyJWT, async (req, res) => {
 
 // booked studio get
 
-app.get("/bookings/:userEmail",verifyJWT, async(req, res)=> {
+app.get("/bookings/:userEmail", verifyJWT, async (req, res) => {
   try {
-    const {userEmail} = req.params;
+    const { userEmail } = req.params;
 
+    if (!userEmail)
+      return res.status(400).send({ message: "User Email is required" });
 
-    if(!userEmail) return res.status(400).send({message: "User Email is required"});
-
-    const userBookings = await studioBookingCollection.find({userEmail:userEmail}).toArray();
+    const userBookings = await studioBookingCollection
+      .find({ userEmail: userEmail })
+      .toArray();
 
     res.send(userBookings);
   } catch (error) {
@@ -171,10 +183,10 @@ app.get("/bookings/:userEmail",verifyJWT, async(req, res)=> {
       .status(500)
       .json({ success: false, message: "Failed to load user bookings" });
   }
-})
+});
 
 // studio booking add
-app.post("/bookings",verifyJWT, async(req, res)=>{
+app.post("/bookings", verifyJWT, async (req, res) => {
   try {
     const studioBooked = req.body;
 
@@ -191,10 +203,39 @@ app.post("/bookings",verifyJWT, async(req, res)=>{
       .status(500)
       .json({ success: false, message: "Failed to add new booking" });
   }
+});
 
+// booking delete
 
-})
+app.delete("/bookings/:id", verifyJWT, async (req, res) => {
+  const { id } = req.params;
 
+  const userId = req.jwtPayload?.sub;
+
+  if (!userId) {
+    return res.status(401).send({ message: "Unauthorized" });
+  }
+
+  if (!ObjectId.isValid(id)) {
+    return res.status(400).send({ message: "Invalid booking Id" });
+  }
+
+  try {
+    const result = await studioBookingCollection.deleteOne({
+      _id: new ObjectId(id),
+      userId: userId,
+    });
+
+    if (result.deletedCount === 0) {
+      return res.status(404).send({ message: "Booking not found or unauthorized" });
+    }
+
+    res.send({ message: "Booking deleted successfully" });
+  } catch (error) {
+    console.error("DELETE /bookings/:id failed:", error);
+    res.status(500).send({ message: "Failed to delete booking" });
+  }
+});
 
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
