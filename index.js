@@ -12,7 +12,6 @@ const app = express();
 app.use(express.json());
 app.use(cors());
 
-// multer setup (image memory te thakbe)
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 10 * 1024 * 1024 },
@@ -24,7 +23,7 @@ const upload = multer({
   },
 });
 
-// imgbb upload helper
+
 async function uploadToImgbb(buffer) {
   const body = new FormData();
   body.append("image", buffer.toString("base64"));
@@ -77,8 +76,6 @@ const verifyJWT = async (req, res, next) => {
       issuer: AUTH_URL,
       audience: AUTH_URL,
     });
-
-    console.log("JWT Payload:", payload);
 
     req.jwtPayload = payload;
     next();
