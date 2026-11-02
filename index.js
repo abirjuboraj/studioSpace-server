@@ -15,7 +15,7 @@ app.use(cors());
 // multer setup (image memory te thakbe)
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
+  limits: { fileSize: 10 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
     if (!file.mimetype.startsWith("image/")) {
       return cb(new Error("Only image files are allowed"));
@@ -59,9 +59,7 @@ const studioBookingCollection = db.collection("bookings");
 
 const AUTH_URL = process.env.BETTER_AUTH_URL;
 
-const JWKS = createRemoteJWKSet(
-  new URL(`${AUTH_URL}/api/auth/jwks`)
-);
+const JWKS = createRemoteJWKSet(new URL(`${AUTH_URL}/api/auth/jwks`));
 
 const verifyJWT = async (req, res, next) => {
   const authHeader = req.headers.authorization;
@@ -132,60 +130,77 @@ app.get("/my-studio-listings/:hostEmail", verifyJWT, async (req, res) => {
 });
 
 // host studio update
+app.patch(
+  "/edit/:id",
+  verifyJWT,
+  upload.array("images", 6),
+  async (req, res) => {
+    try {
+      const { id } = req.params;
+      const hostEmail = req.jwtPayload?.email;
 
-app.patch("/edit/:id", verifyJWT, async (req, res) => {
-  try {
-    const { id } = req.params;
+      if (!hostEmail) {
+        return res.status(401).send({
+          message: "Unauthorized",
+        });
+      }
 
-    const hostEmail = req.jwtPayload?.email;
+      if (!ObjectId.isValid(id)) {
+        return res.status(400).send({
+          message: "Invalid studio Id",
+        });
+      }
 
-    if (!hostEmail) {
-      return res.status(401).send({
-        message: "Unauthorized",
+      if (!req.body.data) {
+        return res.status(400).send({
+          message: "Studio data is required",
+        });
+      }
+
+      const updatedStudio = JSON.parse(req.body.data);
+
+      delete updatedStudio._id;
+      delete updatedStudio.hostId;
+      delete updatedStudio.hostEmail;
+
+      if (req.files && req.files.length > 0) {
+        const uploadedUrls = await Promise.all(
+          req.files.map((file) => uploadToImgbb(file.buffer)),
+        );
+
+        updatedStudio.images = uploadedUrls;
+      }
+
+      const result = await studioCollection.updateOne(
+        {
+          _id: new ObjectId(id),
+          hostEmail: hostEmail,
+        },
+        {
+          $set: updatedStudio,
+        },
+      );
+
+      if (result.matchedCount === 0) {
+        return res.status(404).send({
+          message: "Studio not found or unauthorized",
+        });
+      }
+
+      res.status(200).send({
+        success: true,
+        message: "Studio updated successfully",
+      });
+    } catch (error) {
+      console.error("PATCH /edit/:id failed:", error);
+
+      res.status(500).send({
+        success: false,
+        message: "Failed to update studio",
       });
     }
-
-    if (!ObjectId.isValid(id)) {
-      return res.status(400).send({
-        message: "Invalid studio Id",
-      });
-    }
-
-    const updatedStudio = req.body;
-
-    delete updatedStudio._id;
-    delete updatedStudio.hostId;
-    delete updatedStudio.hostEmail;
-
-    const result = await studioCollection.updateOne(
-      {
-        _id: new ObjectId(id),
-        hostEmail: hostEmail,
-      },
-      {
-        $set: updatedStudio,
-      },
-    );
-
-    if (result.matchedCount === 0) {
-      return res.status(404).send({
-        message: "Studio not found or unauthorized",
-      });
-    }
-
-    res.status(200).send({
-      success: true,
-      message: "Studio updated successfully",
-    });
-  } catch (error) {
-    console.error("PATCH /edit/:id failed:", error);
-
-    res.status(500).send({
-      success: false,
-      message: "Failed to update studio",
-    });
-  }
-});
+  },
+);
 
 // host studio delete
 app.delete("/studios/:id", verifyJWT, async (req, res) => {
@@ -276,9 +291,7 @@ app.post(
   upload.array("images", 6),
   async (req, res) => {
     try {
-
       const newStudio = JSON.parse(req.body.data);
-
 
       const uploadedUrls = await Promise.all(
         (req.files || []).map((file) => uploadToImgbb(file.buffer)),
@@ -402,7 +415,7 @@ app.patch("/bookings/:id/cancel", verifyJWT, async (req, res) => {
   }
 });
 
-// multer error handler 
+// multer error handler
 app.use((err, req, res, next) => {
   if (
     err instanceof multer.MulterError ||
