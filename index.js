@@ -1,6 +1,7 @@
 import express from "express";
 import cors from "cors";
 import "dotenv/config";
+import multer from "multer";
 import { MongoClient, ObjectId } from "mongodb";
 import { createRemoteJWKSet, jwtVerify } from "jose";
 
@@ -10,6 +11,33 @@ const app = express();
 
 app.use(express.json());
 app.use(cors());
+
+// multer setup (image memory te thakbe)
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
+  fileFilter: (req, file, cb) => {
+    if (!file.mimetype.startsWith("image/")) {
+      return cb(new Error("Only image files are allowed"));
+    }
+    cb(null, true);
+  },
+});
+
+// imgbb upload helper
+async function uploadToImgbb(buffer) {
+  const body = new FormData();
+  body.append("image", buffer.toString("base64"));
+
+  const res = await fetch(
+    `https://api.imgbb.com/1/upload?key=${process.env.IMGBB_API_KEY}`,
+    { method: "POST", body },
+  );
+  const data = await res.json();
+
+  if (!data.success) throw new Error("imgbb upload failed");
+  return data.data.url;
+}
 
 const client = new MongoClient(process.env.MONGODB_URI);
 export async function connectToMongoDB() {
@@ -31,35 +59,33 @@ const studioBookingCollection = db.collection("bookings");
 
 const AUTH_URL = process.env.BETTER_AUTH_URL;
 
-const JWKS = createRemoteJWKSet(new URL(`${AUTH_URL}/api/auth/jwks`));
+const JWKS = createRemoteJWKSet(
+  new URL(`${AUTH_URL}/api/auth/jwks`)
+);
 
 const verifyJWT = async (req, res, next) => {
   const authHeader = req.headers.authorization;
 
-  if (!authHeader) {
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
     return res.status(401).send({
-      message: "Authorization header missing",
+      message: "Authorization token missing",
     });
   }
 
   const token = authHeader.split(" ")[1];
 
-  if (!token) {
-    return res.status(401).send({
-      message: "Token missing",
-    });
-  }
-
   try {
-    const { payload } = await jwtVerify(token, JWKS);
+    const { payload } = await jwtVerify(token, JWKS, {
+      issuer: AUTH_URL,
+      audience: AUTH_URL,
+    });
 
     console.log("JWT Payload:", payload);
 
     req.jwtPayload = payload;
-
     next();
   } catch (error) {
-    console.error("JWT Verification Error:", error);
+    console.error("JWT Verification Error:", error.code, error.message);
 
     return res.status(401).send({
       message: "Invalid or expired token",
@@ -244,24 +270,42 @@ app.get("/studios/:id", async (req, res) => {
 
 //new studio add
 
-app.post("/studios/new", verifyJWT, async (req, res) => {
-  const newStudio = req.body;
+app.post(
+  "/studios/add-studio",
+  verifyJWT,
+  upload.array("images", 6),
+  async (req, res) => {
+    try {
 
-  try {
-    const result = await studioCollection.insertOne(newStudio);
-    res.json({
-      success: true,
-      message: "data received",
-      Data: newStudio,
-      Result: result,
-    });
-  } catch (err) {
-    console.error("POST /studios/new failed:", err);
-    res
-      .status(500)
-      .json({ success: false, message: "Failed to add new studio" });
-  }
-});
+      const newStudio = JSON.parse(req.body.data);
+
+
+      const uploadedUrls = await Promise.all(
+        (req.files || []).map((file) => uploadToImgbb(file.buffer)),
+      );
+      newStudio.images = uploadedUrls;
+
+      if (newStudio.images.length === 0) {
+        return res
+          .status(400)
+          .json({ success: false, message: "At least one image is required" });
+      }
+
+      const result = await studioCollection.insertOne(newStudio);
+      res.json({
+        success: true,
+        message: "data received",
+        Data: newStudio,
+        Result: result,
+      });
+    } catch (err) {
+      console.error("POST /studios/new failed:", err);
+      res
+        .status(500)
+        .json({ success: false, message: "Failed to add new studio" });
+    }
+  },
+);
 
 // booked studio get
 
@@ -356,6 +400,17 @@ app.patch("/bookings/:id/cancel", verifyJWT, async (req, res) => {
       message: "Failed to cancel booking",
     });
   }
+});
+
+// multer error handler 
+app.use((err, req, res, next) => {
+  if (
+    err instanceof multer.MulterError ||
+    err.message === "Only image files are allowed"
+  ) {
+    return res.status(400).json({ success: false, message: err.message });
+  }
+  next(err);
 });
 
 app.listen(PORT, () => {
