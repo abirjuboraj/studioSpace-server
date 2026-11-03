@@ -175,8 +175,6 @@ app.patch(
       delete updatedStudio._id;
       delete updatedStudio.hostId;
       delete updatedStudio.hostEmail;
-
-      // Availability is controlled by booking/cancellation routes.
       delete updatedStudio.isBooked;
 
       if (req.files && req.files.length > 0) {
@@ -319,7 +317,6 @@ app.post(
     try {
       const newStudio = JSON.parse(req.body.data);
 
-      // Every new studio starts as available.
       newStudio.isBooked = false;
 
       const uploadedUrls = await Promise.all(
@@ -335,10 +332,10 @@ app.post(
         });
       }
 
-      const { sub } = req.jwtPayload;
+      const  userId  = req.jwtPayload?.sub;
 
       const loggedInUser = await userCollection.findOne({
-        _id: new ObjectId(sub),
+        _id: new ObjectId(userId),
       });
 
       if (!loggedInUser) {
@@ -464,7 +461,7 @@ app.post("/bookings", verifyJWT, async (req, res) => {
       });
     }
 
-    // Atomically reserve the entire studio.
+  
     const lockResult = await studioCollection.updateOne(
       {
         _id: new ObjectId(studioId),
@@ -501,7 +498,7 @@ app.post("/bookings", verifyJWT, async (req, res) => {
     try {
       result = await studioBookingCollection.insertOne(newBooking);
     } catch (insertError) {
-      // Release the studio if booking creation fails.
+  
       await studioCollection.updateOne(
         {
           _id: new ObjectId(studioId),
@@ -551,7 +548,6 @@ app.patch("/bookings/:id/cancel", verifyJWT, async (req, res) => {
       });
     }
 
-    // Find only the current user's pending booking.
     const booking = await studioBookingCollection.findOne({
       _id: new ObjectId(id),
       userId: userId,
@@ -583,7 +579,7 @@ app.patch("/bookings/:id/cancel", verifyJWT, async (req, res) => {
       });
     }
 
-    // Make the studio available again after successful cancellation.
+
     if (ObjectId.isValid(booking.studioId)) {
       await studioCollection.updateOne(
         {
