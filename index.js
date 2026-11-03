@@ -90,6 +90,12 @@ const verifyJWT = async (req, res, next) => {
   }
 };
 
+const timeToMinutes = (time) => {
+  const [hours, minutes] = time.split(":").map(Number);
+
+  return hours * 60 + minutes;
+};
+
 app.get("/", (req, res) => {
   res.send("Server running successfully");
 });
@@ -102,7 +108,7 @@ app.get("/studios", async (req, res) => {
 
     res.send(studios);
   } catch (error) {
-    console.error("GET /studios failed:", err);
+    console.error("GET /studios failed:", error);
     res.status(500).json({ success: false, message: "Failed to load studios" });
   }
 });
@@ -367,8 +373,15 @@ app.post("/bookings", verifyJWT, async (req, res) => {
   try {
     const bookingData = req.body;
 
-    // Get logged-in user from JWT
-    const userId = req.jwtPayload.sub;
+    const {
+      studioId,
+      bookingDate,
+      startTime,
+      endTime,
+    } = bookingData;
+
+  
+    const userId = req.jwtPayload?.sub;
 
     const loggedInUser = await userCollection.findOne({
       _id: new ObjectId(userId),
@@ -381,9 +394,16 @@ app.post("/bookings", verifyJWT, async (req, res) => {
       });
     }
 
-    // Get studio information
+
+    if (!ObjectId.isValid(studioId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid studio ID",
+      });
+    }
+
     const studio = await studioCollection.findOne({
-      _id: new ObjectId(bookingData.studioId),
+      _id: new ObjectId(studioId),
     });
 
     if (!studio) {
@@ -393,20 +413,65 @@ app.post("/bookings", verifyJWT, async (req, res) => {
       });
     }
 
-    // Add user and host information from database
+
+    const isValidTime = (time) =>
+      typeof time === "string" &&
+      /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(time);
+
+    if (!isValidTime(startTime) || !isValidTime(endTime)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid time format",
+      });
+    }
+
+    const newStart = timeToMinutes(startTime);
+    const newEnd = timeToMinutes(endTime);
+
+    if (newEnd <= newStart) {
+      return res.status(400).json({
+        success: false,
+        message: "End time must be later than start time",
+      });
+    }
+
+    const existingBookings = await studioBookingCollection
+      .find({
+        studioId: studioId,
+        bookingDate: bookingDate,
+        status: "confirmed",
+      })
+      .toArray();
+
+
+    const hasConflict = existingBookings.some((booking) => {
+      const existingStart = timeToMinutes(booking.startTime);
+      const existingEnd = timeToMinutes(booking.endTime);
+
+      return newStart < existingEnd && newEnd > existingStart;
+    });
+
+
+    if (hasConflict) {
+      return res.status(409).json({
+        success: false,
+        message:
+          "This studio is already booked for the selected time. Please choose another time.",
+      });
+    }
+
     const newBooking = {
       ...bookingData,
 
-      // User information
       userId: loggedInUser._id.toString(),
       userName: loggedInUser.name,
       userEmail: loggedInUser.email,
 
-      // Host information
       hostId: studio.hostId,
       hostName: studio.hostName,
       hostEmail: studio.hostEmail,
     };
+
 
     const result = await studioBookingCollection.insertOne(newBooking);
 
@@ -425,7 +490,6 @@ app.post("/bookings", verifyJWT, async (req, res) => {
     });
   }
 });
-
 // booking cancel
 
 app.patch("/bookings/:id/cancel", verifyJWT, async (req, res) => {
