@@ -23,7 +23,6 @@ const upload = multer({
   },
 });
 
-
 async function uploadToImgbb(buffer) {
   const body = new FormData();
   body.append("image", buffer.toString("base64"));
@@ -55,6 +54,7 @@ const db = studioSpaceClient.db("studioSpace");
 
 const studioCollection = db.collection("studios");
 const studioBookingCollection = db.collection("bookings");
+const userCollection = db.collection("user");
 
 const AUTH_URL = process.env.BETTER_AUTH_URL;
 
@@ -78,6 +78,8 @@ const verifyJWT = async (req, res, next) => {
     });
 
     req.jwtPayload = payload;
+
+    console.log("JWT Verification Successful:", payload);
     next();
   } catch (error) {
     console.error("JWT Verification Error:", error.code, error.message);
@@ -301,6 +303,27 @@ app.post(
           .json({ success: false, message: "At least one image is required" });
       }
 
+      const { sub } = req.jwtPayload;
+
+      const loggedInUser = await userCollection.findOne({
+        _id: new ObjectId(sub),
+      });
+
+      if (!loggedInUser) {
+        return res.status(404).json({
+          success: false,
+          message: "User not found",
+        });
+      }
+
+      newStudio.userId = loggedInUser._id.toString();
+      newStudio.userName = loggedInUser.name;
+      newStudio.userEmail = loggedInUser.email;
+
+      newStudio.hostId = loggedInUser._id.toString();
+      newStudio.hostName = loggedInUser.name;
+      newStudio.hostEmail = loggedInUser.email;
+
       const result = await studioCollection.insertOne(newStudio);
       res.json({
         success: true,
@@ -339,23 +362,67 @@ app.get("/bookings/:userEmail", verifyJWT, async (req, res) => {
   }
 });
 
-// studio booking add
+// Studio booking add
 app.post("/bookings", verifyJWT, async (req, res) => {
   try {
-    const studioBooked = req.body;
+    const bookingData = req.body;
 
-    const result = await studioBookingCollection.insertOne(studioBooked);
-    res.json({
+    // Get logged-in user from JWT
+    const userId = req.jwtPayload.sub;
+
+    const loggedInUser = await userCollection.findOne({
+      _id: new ObjectId(userId),
+    });
+
+    if (!loggedInUser) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
+    }
+
+    // Get studio information
+    const studio = await studioCollection.findOne({
+      _id: new ObjectId(bookingData.studioId),
+    });
+
+    if (!studio) {
+      return res.status(404).json({
+        success: false,
+        message: "Studio not found",
+      });
+    }
+
+    // Add user and host information from database
+    const newBooking = {
+      ...bookingData,
+
+      // User information
+      userId: loggedInUser._id.toString(),
+      userName: loggedInUser.name,
+      userEmail: loggedInUser.email,
+
+      // Host information
+      hostId: studio.hostId,
+      hostName: studio.hostName,
+      hostEmail: studio.hostEmail,
+    };
+
+    const result = await studioBookingCollection.insertOne(newBooking);
+
+    res.status(201).json({
       success: true,
       message: "Booking received",
-      Data: studioBooked,
-      Result: result,
+      data: newBooking,
+      result,
     });
   } catch (error) {
     console.error("POST /bookings failed:", error);
-    res
-      .status(500)
-      .json({ success: false, message: "Failed to add new booking" });
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to add new booking",
+    });
   }
 });
 
