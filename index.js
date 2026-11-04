@@ -164,13 +164,9 @@ app.patch(
         });
       }
 
-      if (!req.body.data) {
-        return res.status(400).send({
-          message: "Studio data is required",
-        });
-      }
-
-      const updatedStudio = JSON.parse(req.body.data);
+      const updatedStudio = req.body.data
+        ? JSON.parse(req.body.data)
+        : req.body;
 
       delete updatedStudio._id;
       delete updatedStudio.hostId;
