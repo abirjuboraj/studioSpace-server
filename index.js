@@ -177,12 +177,25 @@ app.patch(
       delete updatedStudio.hostEmail;
       delete updatedStudio.isBooked;
 
+      const existingImages = Array.isArray(updatedStudio.images)
+        ? updatedStudio.images
+        : [];
+
+      let uploadedUrls = [];
+
       if (req.files && req.files.length > 0) {
-        const uploadedUrls = await Promise.all(
+        uploadedUrls = await Promise.all(
           req.files.map((file) => uploadToImgbb(file.buffer)),
         );
+      }
 
-        updatedStudio.images = uploadedUrls;
+      updatedStudio.images = [...existingImages, ...uploadedUrls];
+
+      if (updatedStudio.images.length > 6) {
+        return res.status(400).send({
+          success: false,
+          message: "You can have a maximum of 6 studio images.",
+        });
       }
 
       const result = await studioCollection.updateOne(
@@ -191,7 +204,10 @@ app.patch(
           hostEmail: hostEmail,
         },
         {
-          $set: updatedStudio,
+          $set: {
+            ...updatedStudio,
+            updatedAt: new Date(),
+          },
         },
       );
 
@@ -204,6 +220,7 @@ app.patch(
       res.status(200).send({
         success: true,
         message: "Studio updated successfully",
+        images: updatedStudio.images,
       });
     } catch (error) {
       console.error("PATCH /edit/:id failed:", error);
@@ -332,7 +349,7 @@ app.post(
         });
       }
 
-      const  userId  = req.jwtPayload?.sub;
+      const userId = req.jwtPayload?.sub;
 
       const loggedInUser = await userCollection.findOne({
         _id: new ObjectId(userId),
@@ -403,11 +420,7 @@ app.post("/bookings", verifyJWT, async (req, res) => {
   try {
     const bookingData = req.body;
 
-    const {
-      studioId,
-      startTime,
-      endTime,
-    } = bookingData;
+    const { studioId, startTime, endTime } = bookingData;
 
     const userId = req.jwtPayload?.sub;
 
@@ -441,8 +454,7 @@ app.post("/bookings", verifyJWT, async (req, res) => {
     }
 
     const isValidTime = (time) =>
-      typeof time === "string" &&
-      /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(time);
+      typeof time === "string" && /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(time);
 
     if (!isValidTime(startTime) || !isValidTime(endTime)) {
       return res.status(400).json({
@@ -461,7 +473,6 @@ app.post("/bookings", verifyJWT, async (req, res) => {
       });
     }
 
-  
     const lockResult = await studioCollection.updateOne(
       {
         _id: new ObjectId(studioId),
@@ -498,7 +509,6 @@ app.post("/bookings", verifyJWT, async (req, res) => {
     try {
       result = await studioBookingCollection.insertOne(newBooking);
     } catch (insertError) {
-  
       await studioCollection.updateOne(
         {
           _id: new ObjectId(studioId),
@@ -578,7 +588,6 @@ app.patch("/bookings/:id/cancel", verifyJWT, async (req, res) => {
         message: "Booking not found or cannot be cancelled",
       });
     }
-
 
     if (ObjectId.isValid(booking.studioId)) {
       await studioCollection.updateOne(
